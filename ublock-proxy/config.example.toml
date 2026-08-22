@@ -1,0 +1,52 @@
+# ubproxy — example configuration (all keys are optional)
+
+# --- listeners -------------------------------------------------------------
+listen_address = "0.0.0.0"
+http_port = 8080          # netfilter redirects TCP/80 here
+tls_port  = 8443          # netfilter redirects TCP/443 here
+
+# --- filter lists ----------------------------------------------------------
+# URLs are downloaded and cached; local paths are read as-is.
+lists = [
+  "https://easylist.to/easylist/easylist.txt",
+  "https://easylist.to/easylist/easyprivacy.txt",
+  "https://ublockorigin.github.io/uAssets/filters/filters.txt",
+  "https://ublockorigin.github.io/uAssets/filters/privacy.txt",
+  "https://ublockorigin.github.io/uAssets/filters/badware.txt",
+  # "filters/sample.txt",
+]
+list_refresh_hours = 24
+
+# Extra rules in uBlock syntax, applied on top of the lists.
+extra_rules = [
+  # "||annoying-tracker.example^",
+  # "monsite.fr##.banniere-pub",
+]
+
+# Hosts that are never filtered (banking, work tools...).
+allow_hosts = [
+  # "*.mabanque.fr",
+]
+
+# --- cosmetic filtering ----------------------------------------------------
+cosmetic_filtering = true          # inject the hiding CSS into HTML pages
+generic_cosmetic_filtering = false # generic ##rules: heavier, more breakage
+max_html_rewrite_bytes = 4194304
+
+# --- HTTPS -----------------------------------------------------------------
+# false: filter HTTPS by SNI hostname only (no certificate to install)
+# true : decrypt to filter full URLs and inject cosmetic CSS
+mitm = false
+upstream_verify = true
+mitm_bypass_hosts = [
+  "*.apple.com", "*.icloud.com", "*.mozilla.org",
+  "*.windowsupdate.com", "*.whatsapp.net", "*.signal.org",
+]
+
+# --- misc ------------------------------------------------------------------
+# state_dir = "/var/lib/ubproxy"
+log_level = "info"
+log_allowed = false
+stats_interval = 0      # seconds between statistics lines (0 = never)
+idle_timeout = 120.0
+connect_timeout = 10.0

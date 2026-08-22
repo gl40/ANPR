@@ -18,3 +18,9 @@ DerivedData
 
 #CocoaPods
 Pods
+
+# ublock-proxy
+__pycache__/
+*.pyc
+.pytest_cache/
+ublock-proxy/filters/*.cache

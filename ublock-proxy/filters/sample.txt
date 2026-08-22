@@ -1,0 +1,16 @@
+! Title: ubproxy sample list
+! A handful of rules to try the proxy without downloading anything.
+||doubleclick.net^
+||googlesyndication.com^
+||googletagmanager.com^
+||google-analytics.com^
+||scorecardresearch.com^
+||criteo.com^$third-party
+||outbrain.com^$third-party
+||taboola.com^$third-party
+/pagead/js/adsbygoogle.js
+/analytics.js|$script
+##.adsbygoogle
+##div[id^="google_ads_"]
+##.ad-banner
+lemonde.fr##.pub

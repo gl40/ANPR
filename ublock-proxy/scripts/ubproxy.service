@@ -1,0 +1,26 @@
+[Unit]
+Description=ubproxy — filtering transparent proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubproxy
+Group=ubproxy
+ExecStart=/usr/bin/python3 -m ubproxy --config /etc/ubproxy/config.toml run
+WorkingDirectory=/opt/ubproxy
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=3
+StateDirectory=ubproxy
+Environment=XDG_STATE_HOME=/var/lib
+
+# The proxy binds unprivileged ports only; netfilter does the redirection.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/ubproxy
+
+[Install]
+WantedBy=multi-user.target
