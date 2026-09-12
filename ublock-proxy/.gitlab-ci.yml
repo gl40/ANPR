@@ -1,0 +1,57 @@
+# Pipeline du projet autonome ubproxy.
+stages: [test, build]
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_NO_CACHE_DIR: "1"
+
+.tests:
+  stage: test
+  before_script:
+    - pip install -r requirements.txt -r requirements-dev.txt
+  script:
+    - python -m pytest -q
+
+test:py311:
+  extends: .tests
+  image: python:3.11-slim
+
+test:py312:
+  extends: .tests
+  image: python:3.12-slim
+
+# Vérifie que le moteur décide correctement en ligne de commande : la liste
+# d'exemple doit bloquer une régie connue et laisser passer une page ordinaire.
+# `check` sort en 1 quand l'URL est bloquée, d'où les tests inversés.
+smoke:filters:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - pip install -r requirements.txt
+  script:
+    - python -m ubproxy -l filters/sample.txt stats
+    - |
+      if python -m ubproxy -l filters/sample.txt check \
+          https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js --doc lemonde.fr; then
+        echo "ERREUR : cette URL aurait dû être bloquée" >&2; exit 1
+      fi
+    - python -m ubproxy -l filters/sample.txt check https://www.lemonde.fr/article.html --doc lemonde.fr
+
+# Publie l'image dans le registre du projet. Nécessite un runner privilégié
+# (docker-in-docker) ; avec des runners non privilégiés, remplacer par kaniko.
+build:image:
+  stage: build
+  image: docker:27-cli
+  services: ["docker:27-dind"]
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        docker tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+        docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+      fi
