@@ -1,0 +1,13 @@
+# Le cache des listes et surtout la CA de déchiffrement vivent ici : sans
+# volume, chaque redémarrage génère une nouvelle CA et tous les clients qui
+# lui font confiance cassent.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ubproxy-state
+  labels: {app.kubernetes.io/name: ubproxy}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi

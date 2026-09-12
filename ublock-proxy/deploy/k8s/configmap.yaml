@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ubproxy-config
+  labels: {app.kubernetes.io/name: ubproxy}
+data:
+  config.toml: |
+    listen_address = "0.0.0.0"
+    http_port = 8080
+    tls_port  = 8443
+
+    lists = [
+      "https://easylist.to/easylist/easylist.txt",
+      "https://easylist.to/easylist/easyprivacy.txt",
+      "https://ublockorigin.github.io/uAssets/filters/filters.txt",
+      "https://ublockorigin.github.io/uAssets/filters/privacy.txt",
+      "https://ublockorigin.github.io/uAssets/filters/badware.txt",
+    ]
+    list_refresh_hours = 24
+
+    extra_rules = [
+      # iOS : empêche le Relais privé iCloud de contourner le proxy
+      # "||mask.icloud.com^", "||mask-h2.icloud.com^", "||mask-api.icloud.com^",
+    ]
+    allow_hosts = []
+
+    cosmetic_filtering = true
+    generic_cosmetic_filtering = false
+
+    # true = déchiffrement HTTPS : impose d'installer la CA sur les clients,
+    # et de garder le volume d'état (la CA doit rester la même).
+    mitm = false
+
+    state_dir = "/var/lib/ubproxy"
+    log_level = "info"
+    stats_interval = 3600

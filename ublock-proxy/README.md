@@ -209,6 +209,20 @@ Points à connaître :
   privée (mode 600). Déchiffrer le trafic d'autrui sans son accord n'est ni
   légal ni acceptable.
 
+## Déploiement en conteneur
+
+`Dockerfile`, `deploy/compose.yaml` et `deploy/k8s/` (ConfigMap, PVC,
+Deployment, Service, plus une variante DaemonSet transparente) sont fournis ;
+voir `deploy/k8s/README.md`. Deux points à garder en tête :
+
+* l'état (cache des listes et **CA de déchiffrement**) doit être persistant et
+  unique — une CA régénérée à chaque redémarrage, ou deux répliques avec deux
+  CA, cassent tous les clients qui lui font confiance ;
+* en conteneur ou sur un cluster, seul le **mode proxy explicite** est
+  généralement exploitable : la redirection transparente suppose que le trafic
+  du client traverse la machine, ce qui n'est pas le cas d'un nœud Kubernetes
+  ordinaire.
+
 ## Configuration
 
 Toutes les clés sont optionnelles, voir `config.example.toml` :

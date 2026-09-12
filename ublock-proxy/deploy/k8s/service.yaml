@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ubproxy
+  labels: {app.kubernetes.io/name: ubproxy}
+  annotations:
+    # MetalLB : fixer l'IP, les clients la gardent dans leurs réglages Wi-Fi.
+    metallb.universe.tf/loadBalancerIPs: "192.168.1.240"
+spec:
+  type: LoadBalancer          # sinon NodePort, ou ClusterIP + Ingress TCP
+  # Conserve l'IP réelle du client dans les journaux d'accès.
+  externalTrafficPolicy: Local
+  selector: {app.kubernetes.io/name: ubproxy}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+    - {name: tls, port: 8443, targetPort: tls}

@@ -1,0 +1,20 @@
+# Docker / Podman Compose — proxy explicite joignable sur le LAN.
+services:
+  ubproxy:
+    build: ..
+    image: ubproxy:1.0.0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"     # HTTP + CONNECT + page d'état / certificat
+      - "8443:8443"     # TLS transparent (inutile en proxy explicite)
+    volumes:
+      - ubproxy-state:/var/lib/ubproxy      # listes en cache + CA stable
+      - ./config.toml:/etc/ubproxy/config.toml:ro
+    command: ["--config", "/etc/ubproxy/config.toml", "run"]
+    # Le mode transparent exige en plus :
+    #   network_mode: host
+    #   cap_add: [NET_ADMIN]
+    # et de poser les règles netfilter sur l'hôte (scripts/ubproxy-redirect.sh).
+
+volumes:
+  ubproxy-state:

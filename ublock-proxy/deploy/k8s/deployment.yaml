@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ubproxy
+  labels: {app.kubernetes.io/name: ubproxy}
+spec:
+  # Une seule instance : l'état (CA, cache des listes) est sur un volume RWO,
+  # et deux répliques avec des CA différentes casseraient les clients.
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/name: ubproxy}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ubproxy}
+      annotations:
+        checksum/config: "remplacer-par-le-hash-du-configmap-pour-forcer-le-rollout"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: ubproxy
+          image: REGISTRY/ubproxy:1.0.0      # à construire et pousser
+          args: ["--config", "/etc/ubproxy/config.toml", "run"]
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: tls, containerPort: 8443}
+          volumeMounts:
+            - {name: config, mountPath: /etc/ubproxy, readOnly: true}
+            - {name: state, mountPath: /var/lib/ubproxy}
+          resources:
+            # EasyList + EasyPrivacy + uAssets tiennent ~300 Mio en mémoire une
+            # fois compilées : une limite trop basse fait tuer le pod au
+            # chargement des listes.
+            requests: {cpu: 100m, memory: 384Mi}
+            limits: {cpu: "1", memory: 768Mi}
+          startupProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 5
+            failureThreshold: 24        # le téléchargement des listes prend du temps
+          readinessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+      volumes:
+        - name: config
+          configMap: {name: ubproxy-config}
+        - name: state
+          persistentVolumeClaim: {claimName: ubproxy-state}

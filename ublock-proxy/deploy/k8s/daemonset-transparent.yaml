@@ -1,0 +1,65 @@
+# Variante TRANSPARENTE — à n'utiliser que si les nœuds du cluster routent
+# réellement le trafic des clients (nœud passerelle du LAN, ou tunnel VPN qui
+# aboutit sur le nœud). Pour un cluster classique, ce n'est pas le cas : le
+# trafic de l'iPhone ne traverse jamais les nœuds, et c'est le Deployment en
+# proxy explicite (deployment.yaml + service.yaml) qu'il faut utiliser.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ubproxy-transparent
+  labels: {app.kubernetes.io/name: ubproxy-transparent}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: ubproxy-transparent}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: ubproxy-transparent}
+    spec:
+      # Indispensable : le proxy lit la destination d'origine du socket
+      # (SO_ORIGINAL_DST), ce qui suppose de partager la pile réseau du nœud.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      nodeSelector:
+        ubproxy.io/gateway: "true"     # n'atterrit que sur les nœuds passerelle
+      initContainers:
+        - name: netfilter
+          image: registry.k8s.io/build-image/debian-iptables:bookworm-v1.6.0
+          securityContext:
+            privileged: true           # nécessaire pour écrire dans la table nat
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              LAN_IF="${LAN_IF:-eth0}"
+              iptables -t nat -N UBPROXY 2>/dev/null || true
+              iptables -t nat -F UBPROXY
+              for net in 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16; do
+                iptables -t nat -A UBPROXY -d "$net" -j RETURN
+              done
+              iptables -t nat -A UBPROXY -p tcp --dport 80 -j REDIRECT --to-ports 8080
+              iptables -t nat -A UBPROXY -p tcp --dport 443 -j REDIRECT --to-ports 8443
+              iptables -t nat -C PREROUTING -i "$LAN_IF" -p tcp -j UBPROXY 2>/dev/null ||
+                iptables -t nat -A PREROUTING -i "$LAN_IF" -p tcp -j UBPROXY
+              # HTTP/3 contournerait le proxy : on le refuse pour forcer TLS/TCP.
+              iptables -C FORWARD -i "$LAN_IF" -p udp --dport 443 -j REJECT 2>/dev/null ||
+                iptables -A FORWARD -i "$LAN_IF" -p udp --dport 443 -j REJECT
+          env:
+            - {name: LAN_IF, value: "eth0"}
+      containers:
+        - name: ubproxy
+          image: REGISTRY/ubproxy:1.0.0
+          args: ["--config", "/etc/ubproxy/config.toml", "run"]
+          volumeMounts:
+            - {name: config, mountPath: /etc/ubproxy, readOnly: true}
+            - {name: state, mountPath: /var/lib/ubproxy}
+          resources:
+            requests: {cpu: 100m, memory: 384Mi}
+            limits: {cpu: "1", memory: 768Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: ["ALL"]}
+      volumes:
+        - name: config
+          configMap: {name: ubproxy-config}
+        - name: state
+          hostPath: {path: /var/lib/ubproxy, type: DirectoryOrCreate}
