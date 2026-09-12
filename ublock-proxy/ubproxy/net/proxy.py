@@ -9,10 +9,11 @@ import logging
 import socket
 import ssl
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
 
-from .. import blockpage
+from .. import blockpage, setuppage
 from ..config import Config
 from ..domains import host_matches
 from ..filtering import Filtering
@@ -59,6 +60,9 @@ class ConnectionContext:
     upstream_tls: bool = False
     sni: str = ""
     peer: str = ""
+    #: Address the client actually connected to, to recognise requests aimed
+    #: at the proxy itself.
+    local: Optional[tuple[str, int]] = None
     rewrite_html: bool = True
     _upstream: dict = field(default_factory=dict)
 
@@ -72,8 +76,6 @@ class Proxy:
         self._upstream_ssl = upstream_context(config.upstream_verify)
         self._servers: list[asyncio.base_events.Server] = []
         if config.mitm:
-            from pathlib import Path
-
             self.ca = CertificateAuthority(
                 Path(config.ca_cert), Path(config.ca_key), config.cert_dir
             )
@@ -121,18 +123,48 @@ class Proxy:
             with contextlib.suppress(Exception):
                 await server.wait_closed()
 
+    def _is_direct_hit(self, request: http1.RequestHead, context: ConnectionContext) -> bool:
+        """True when the client dialled the listener itself, unproxied.
+
+        Redirected connections always carry an original destination, and a
+        configured proxy client sends an absolute target or CONNECT — so an
+        origin-form request with neither is somebody typing the proxy's address
+        into a browser.
+        """
+        if (
+            context.scheme != "http"
+            or context.destination is not None
+            or context.local is None
+            or request.target.startswith("http://")
+            or request.target.startswith("https://")
+        ):
+            return False
+        authority = request.headers.get("Host") or ""
+        host, _, port_text = authority.rpartition(":")
+        if not port_text.isdigit():
+            host, port_text = authority, "80"
+        host = host.strip("[]").lower()
+        local_host, local_port = context.local[0], context.local[1]
+        if int(port_text) != local_port:
+            return False
+        return host == local_host or (
+            host == "localhost" and local_host in ("127.0.0.1", "::1")
+        )
+
     # ------------------------------------------------------------- entry points
 
     async def _handle_plain(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.stats.connections += 1
         peer = _peer_name(writer)
         destination = _destination(writer)
+        local = writer.get_extra_info("sockname")
         context = ConnectionContext(
             scheme="http",
             host=destination[0] if destination else "",
             port=destination[1] if destination else 80,
             destination=destination,
             peer=peer,
+            local=(local[0], local[1]) if local else None,
         )
         try:
             await self._serve_http(reader, writer, context)
@@ -301,6 +333,24 @@ class Proxy:
                 if request.method == "CONNECT":
                     await self._handle_connect(reader, writer, request, context)
                     return
+
+                if self._is_direct_hit(request, context):
+                    # Someone opened the proxy's own port in a browser: answer
+                    # locally instead of trying to relay the request to
+                    # ourselves.
+                    writer.write(
+                        setuppage.handle(
+                            request.target,
+                            self.filtering.engine.rule_count,
+                            self.config.mitm,
+                            Path(self.config.ca_cert),
+                        )
+                    )
+                    await writer.drain()
+                    await http1.drain_body(reader, http1.request_framing(request))
+                    if http1.connection_closes(request.headers, request.version):
+                        return
+                    continue
 
                 url, host, port, path = _resolve_target(request, context)
                 if not host:

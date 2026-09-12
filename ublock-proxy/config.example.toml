@@ -21,6 +21,9 @@ list_refresh_hours = 24
 extra_rules = [
   # "||annoying-tracker.example^",
   # "monsite.fr##.banniere-pub",
+  # iOS: blocking iCloud Private Relay entry points makes Safari fall back to
+  # direct connections, which the proxy can see.
+  # "||mask.icloud.com^", "||mask-h2.icloud.com^", "||mask-api.icloud.com^",
 ]
 
 # Hosts that are never filtered (banking, work tools...).

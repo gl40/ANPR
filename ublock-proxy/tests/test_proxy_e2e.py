@@ -310,3 +310,59 @@ def test_mitm_bypass_covers_the_bare_domain():
             await proxy.close()
 
     asyncio.run(asyncio.wait_for(run(), 30))
+
+
+def test_setup_page_and_ca_download_on_the_listener_itself():
+    """Opening the proxy's port in a browser must not relay to ourselves."""
+
+    async def run():
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(Path(tmp), mitm=True)
+            proxy, http_port, _ = await start_proxy(config)
+
+            reader, writer = await asyncio.open_connection("127.0.0.1", http_port)
+            writer.write(f"GET / HTTP/1.1\r\nHost: 127.0.0.1:{http_port}\r\n\r\n".encode())
+            await writer.drain()
+            head, body = await read_response(reader)
+            assert head.startswith("HTTP/1.1 200") and b"ubproxy-ca.crt" in body
+
+            # same connection: download the certificate
+            writer.write(
+                f"GET /ubproxy-ca.crt HTTP/1.1\r\nHost: 127.0.0.1:{http_port}\r\n\r\n".encode()
+            )
+            await writer.drain()
+            head, body = await read_response(reader)
+            assert "application/x-x509-ca-cert" in head
+            assert body.startswith(b"-----BEGIN CERTIFICATE-----")
+            assert body == Path(config.ca_cert).read_bytes()
+
+            writer.write(f"GET /nope HTTP/1.1\r\nHost: 127.0.0.1:{http_port}\r\n\r\n".encode())
+            await writer.drain()
+            head, _ = await read_response(reader)
+            assert head.startswith("HTTP/1.1 404")
+
+            writer.close()
+            await proxy.close()
+
+    asyncio.run(asyncio.wait_for(run(), 30))
+
+
+def test_setup_page_is_not_served_to_proxied_requests():
+    """A request for another host on the same port is still proxied."""
+
+    async def run():
+        with tempfile.TemporaryDirectory() as tmp:
+            origin, origin_port = await start_origin()
+            proxy, http_port, _ = await start_proxy(make_config(Path(tmp)))
+            reader, writer = await asyncio.open_connection("127.0.0.1", http_port)
+            writer.write(
+                f"GET /index.html HTTP/1.1\r\nHost: 127.0.0.1:{origin_port}\r\n\r\n".encode()
+            )
+            await writer.drain()
+            head, body = await read_response(reader)
+            assert head.startswith("HTTP/1.1 200") and b"hello" in body
+            writer.close()
+            await proxy.close()
+            origin.close()
+
+    asyncio.run(asyncio.wait_for(run(), 30))

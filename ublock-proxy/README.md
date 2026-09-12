@@ -115,6 +115,76 @@ proxy ; refusé, le trafic retombe sur TLS/TCP.
 
 Un service systemd d'exemple est fourni : `scripts/ubproxy.service`.
 
+## Filtrer un iPhone / iPad
+
+L'iPhone n'exécute rien : le proxy tourne sur une autre machine du réseau (Mac,
+Raspberry Pi, NAS, VM Linux). Trois montages, du plus simple au plus complet.
+
+**A. Proxy Wi-Fi manuel — rien à configurer côté réseau**
+
+```sh
+python3 -m ubproxy run --http-port 8080          # sur la machine hôte
+```
+
+Sur l'iPhone : *Réglages → Wi-Fi → (i) du réseau → Configurer le proxy →
+Manuel*, serveur = IP de la machine, port = 8080. Safari et la plupart des
+applications (tout ce qui utilise `URLSession`) passent alors par le proxy.
+Limites : uniquement sur ce réseau Wi-Fi, rien en 4G/5G, et une application qui
+ouvre ses propres sockets peut ignorer le réglage.
+
+**B. Passerelle transparente — tout le Wi-Fi, sans réglage sur l'iPhone**
+
+La machine doit être la **passerelle par défaut** de l'iPhone : soit le routeur
+annonce son IP en DHCP (option *router*), soit l'iPhone se connecte au partage
+de connexion / point d'accès de cette machine.
+
+```sh
+sudo LAN_IF=wlan0 scripts/ubproxy-redirect.sh up
+sudo -u ubproxy python3 -m ubproxy --config /etc/ubproxy/config.toml run
+```
+
+**C. WireGuard — couvre aussi la 4G/5G**
+
+Un serveur WireGuard sur la même machine, l'iPhone comme client, et le trafic
+sortant du tunnel est redirigé vers le proxy :
+
+```sh
+sudo LAN_IF=wg0 scripts/ubproxy-redirect.sh up
+```
+
+Le filtrage suit alors le téléphone partout, sans dépendre du réseau Wi-Fi.
+
+### Installer le certificat (uniquement si `mitm = true`)
+
+Depuis Safari sur l'iPhone, ouvrez `http://<ip-de-la-machine>:8080/` : le proxy
+sert une page d'état avec un lien de téléchargement du certificat. Ensuite :
+
+1. *Réglages → Profil téléchargé → Installer* ;
+2. *Réglages → Général → Informations → Réglages de confiance des certificats*
+   → activer `ubproxy local CA`.
+
+**La seconde étape est obligatoire** : sans elle iOS installe le certificat mais
+ne lui fait pas confiance, et toutes les connexions HTTPS échouent.
+
+### Particularités iOS
+
+* **Relais privé iCloud** (abonnés iCloud+) fait sortir le trafic Safari par un
+  tunnel chiffré qui contourne entièrement le proxy. Désactivez-le
+  (*Réglages → [votre nom] → iCloud → Relais privé*) ou bloquez ses points
+  d'entrée, ce qui fait basculer iOS en connexion directe :
+
+  ```toml
+  extra_rules = ["||mask.icloud.com^", "||mask-h2.icloud.com^", "||mask-api.icloud.com^"]
+  ```
+
+* **HTTP/3 (QUIC)** est largement utilisé par iOS ; en montage B ou C le script
+  netfilter rejette l'UDP/443, ce qui force le retour à TLS/TCP visible par le
+  proxy. En montage A, le trafic proxifié n'utilise pas QUIC.
+* **Applications à épinglage de certificat** (banques, apps Apple) : gardez-les
+  dans `mitm_bypass_hosts`, elles seront tunnelisées sans déchiffrement.
+* Sans `mitm`, aucun certificat n'est à installer et le filtrage par SNI
+  supprime déjà l'essentiel des régies et traqueurs dans les applications.
+
 ## Déchiffrement HTTPS (optionnel)
 
 ```sh
@@ -176,6 +246,7 @@ ubproxy/
   net/proxy.py        boucle de connexion : blocage, relais, tunnel, injection
   blockpage.py        réponses de remplacement (pixel, CSS/JS vide, page 403)
   inject.py           insertion du <style> cosmétique dans le HTML
+  setuppage.py        page d'état + téléchargement du certificat CA
   cli.py              run / check / cosmetics / stats / update-lists / gen-ca
 ```
 
@@ -198,7 +269,7 @@ Choix de conception notables :
 ## Tests
 
 ```sh
-python3 -m pytest -q      # 60 tests
+python3 -m pytest -q      # 64 tests
 ```
 
 Ils couvrent la syntaxe des filtres, la précédence des règles, le parsing
